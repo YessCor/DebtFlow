@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo } from "react"
+import { useState, useEffect } from "react"
 import Link from "next/link"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -20,18 +20,14 @@ import {
   Activity,
 } from "lucide-react"
 import {
-  debts,
-  activities,
-  users,
-  payments,
-  monthlyTrendData,
-  statusDistribution,
-  monthlyPayments,
-  formatCurrency,
-  formatDate,
-  getRelativeTime,
-  getUserById,
-} from "@/lib/mock-data"
+  getAllUsers,
+  getAllLoans,
+  getAllPayments,
+  getAdminStats,
+  type DbUser,
+  type DbLoan,
+  type DbPayment,
+} from "@/lib/supabase-admin"
 import {
   LineChart,
   Line,
@@ -48,53 +44,113 @@ import {
   Area,
 } from "recharts"
 
-export default function AdminDashboardPage() {
-  // Calculate user statistics
-  const userStats = useMemo(() => {
-    const regularUsers = users.filter((u) => u.role === "user")
-    const activeUsers = regularUsers.filter((u) => u.status === "active").length
-    const totalUsers = regularUsers.length
-    
-    const usersWithDebts = regularUsers.map((user) => {
-      const userDebts = debts.filter((d) => d.userId === user.id)
-      const totalOriginal = userDebts.reduce((sum, d) => sum + d.originalAmount, 0)
-      const totalPaid = userDebts.reduce((sum, d) => sum + d.paidAmount, 0)
-      const totalPending = totalOriginal - totalPaid
-      const overdueDebts = userDebts.filter((d) => d.status === "overdue").length
-      const activeDebts = userDebts.filter((d) => d.status !== "paid").length
-      const paymentProgress = totalOriginal > 0 ? (totalPaid / totalOriginal) * 100 : 0
-      
-      return {
-        ...user,
-        totalOriginal,
-        totalPaid,
-        totalPending,
-        overdueDebts,
-        activeDebts,
-        paymentProgress,
-        debtCount: userDebts.length,
-      }
-    }).sort((a, b) => b.totalPending - a.totalPending)
+const formatCurrency = (amount: number) => {
+  return new Intl.NumberFormat("es-US", {
+    style: "currency",
+    currency: "USD",
+  }).format(amount)
+}
 
-    const totalPendingAll = usersWithDebts.reduce((sum, u) => sum + u.totalPending, 0)
-    const totalPaidAll = usersWithDebts.reduce((sum, u) => sum + u.totalPaid, 0)
-    const usersWithOverdue = usersWithDebts.filter((u) => u.overdueDebts > 0).length
+const formatDate = (dateString: string) => {
+  return new Date(dateString).toLocaleDateString("es-ES", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  })
+}
+
+export default function AdminDashboardPage() {
+  const [loading, setLoading] = useState(true)
+  const [users, setUsers] = useState<DbUser[]>([])
+  const [loans, setLoans] = useState<DbLoan[]>([])
+  const [payments, setPayments] = useState<DbPayment[]>([])
+  const [stats, setStats] = useState({
+    totalUsers: 0,
+    totalLoans: 0,
+    activeLoans: 0,
+    totalPending: 0,
+    totalPaid: 0,
+    unreadNotifications: 0,
+  })
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        const [usersData, loansData, paymentsData, statsData] = await Promise.all([
+          getAllUsers(),
+          getAllLoans(),
+          getAllPayments(),
+          getAdminStats(),
+        ])
+        setUsers(usersData as DbUser[])
+        setLoans(loansData as DbLoan[])
+        setPayments(paymentsData as DbPayment[])
+        setStats(statsData)
+      } catch (err) {
+        console.error("Error fetching data:", err)
+        setError("Error al cargar los datos")
+      } finally {
+        setLoading(false)
+      }
+    }
+    fetchData()
+  }, [])
+
+  if (loading) {
+    return (
+      <div className="p-4 lg:p-6 space-y-6">
+        <div className="flex items-center justify-center h-96">
+          <p className="text-muted-foreground">Cargando datos...</p>
+        </div>
+      </div>
+    )
+  }
+
+  const regularUsers = users.filter((u) => u.role === "user")
+  const totalUsers = regularUsers.length
+  const activeUsers = totalUsers
+
+  const usersWithLoans = regularUsers.map((user) => {
+    const userLoans = loans.filter((l) => l.owner_id === user.id)
+    const totalOriginal = userLoans.reduce((sum, l) => sum + Number(l.principal_amount), 0)
+    const totalPending = userLoans
+      .filter((l) => l.status === "active")
+      .reduce((sum, l) => sum + Number(l.principal_amount), 0)
+    const activeLoansCount = userLoans.filter((l) => l.status === "active").length
     
     return {
-      totalUsers,
-      activeUsers,
-      usersWithDebts,
-      totalPendingAll,
-      totalPaidAll,
-      usersWithOverdue,
+      ...user,
+      totalOriginal,
+      totalPending,
+      activeLoansCount,
+      loanCount: userLoans.length,
     }
-  }, [])
+  }).sort((a, b) => b.totalPending - a.totalPending)
 
   const recentPayments = payments.slice(0, 5)
 
+  const loanStatusData = [
+    { name: "Activas", value: loans.filter(l => l.status === "active").length, color: "#1A56DB" },
+    { name: "Cerradas", value: loans.filter(l => l.status === "closed").length, color: "#10B981" },
+    { name: "Canceladas", value: loans.filter(l => l.status === "canceled").length, color: "#EF4444" },
+  ]
+
+  const monthlyPaymentsData = payments
+    .filter(p => p.status === "paid")
+    .reduce((acc: Record<string, number>, payment) => {
+      const month = new Date(payment.paid_on).toLocaleString("es-ES", { month: "short" })
+      acc[month] = (acc[month] || 0) + Number(payment.amount)
+      return acc
+    }, {})
+
+  const monthlyTrendData = Object.entries(monthlyPaymentsData).map(([month, amount]) => ({
+    month,
+    amount,
+  })).slice(-12)
+
   return (
     <div className="p-4 lg:p-6 space-y-6">
-      {/* Page Title */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h1 className="text-2xl lg:text-3xl font-bold text-foreground">Panel de Administración</h1>
@@ -108,128 +164,123 @@ export default function AdminDashboardPage() {
         </Link>
       </div>
 
-      {/* KPI Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <KPICard
           title="Total Usuarios"
-          value={userStats.totalUsers}
-          subtitle={`${userStats.activeUsers} activos`}
+          value={totalUsers}
+          subtitle={`${activeUsers} activos`}
           icon={Users}
         />
         <KPICard
           title="Total Recaudado"
-          value={formatCurrency(userStats.totalPaidAll)}
-          trend={{ value: 12.5, label: "vs mes anterior" }}
+          value={formatCurrency(stats.totalPaid)}
           icon={DollarSign}
           variant="success"
         />
         <KPICard
           title="Deuda Total Pendiente"
-          value={formatCurrency(userStats.totalPendingAll)}
+          value={formatCurrency(stats.totalPending)}
           subtitle="En todos los usuarios"
           icon={TrendingUp}
         />
         <KPICard
-          title="Usuarios con Deudas Vencidas"
-          value={userStats.usersWithOverdue}
-          subtitle="Requieren seguimiento"
+          title="Total Préstamos"
+          value={stats.totalLoans}
+          subtitle={`${stats.activeLoans} activos`}
           icon={AlertCircle}
-          variant="danger"
         />
       </div>
 
-      {/* Charts Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Payment Trend Chart */}
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <TrendingUp className="h-5 w-5 text-primary" />
-              Tendencia de Recaudación
+              Pagos por Mes
             </CardTitle>
-            <CardDescription>Pagos recibidos de usuarios - Últimos 12 meses</CardDescription>
+            <CardDescription>Pagos recibidos de usuarios</CardDescription>
           </CardHeader>
           <CardContent>
             <div className="h-[300px]">
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={monthlyTrendData}>
-                  <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                  <XAxis dataKey="month" className="text-xs" />
-                  <YAxis className="text-xs" tickFormatter={(v) => `$${v / 1000}k`} />
-                  <Tooltip
-                    formatter={(value: number) => formatCurrency(value)}
-                    contentStyle={{
-                      backgroundColor: "hsl(var(--card))",
-                      border: "1px solid hsl(var(--border))",
-                      borderRadius: "8px",
-                    }}
-                  />
-                  <Legend />
-                  <Line
-                    type="monotone"
-                    dataKey="created"
-                    name="Deudas Registradas"
-                    stroke="hsl(var(--primary))"
-                    strokeWidth={2}
-                    dot={false}
-                  />
-                  <Line
-                    type="monotone"
-                    dataKey="paid"
-                    name="Pagos Recibidos"
-                    stroke="hsl(var(--accent))"
-                    strokeWidth={2}
-                    dot={false}
-                  />
-                </LineChart>
-              </ResponsiveContainer>
+              {monthlyTrendData.length > 0 ? (
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={monthlyTrendData}>
+                    <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                    <XAxis dataKey="month" className="text-xs" />
+                    <YAxis className="text-xs" tickFormatter={(v) => `$${v / 1000}k`} />
+                    <Tooltip
+                      formatter={(value: number) => formatCurrency(value)}
+                      contentStyle={{
+                        backgroundColor: "hsl(var(--card))",
+                        border: "1px solid hsl(var(--border))",
+                        borderRadius: "8px",
+                      }}
+                    />
+                    <Line
+                      type="monotone"
+                      dataKey="amount"
+                      name="Pagos"
+                      stroke="hsl(var(--primary))"
+                      strokeWidth={2}
+                      dot={false}
+                    />
+                  </LineChart>
+                </ResponsiveContainer>
+              ) : (
+                <div className="h-full flex items-center justify-center text-muted-foreground">
+                  No hay datos de pagos
+                </div>
+              )}
             </div>
           </CardContent>
         </Card>
 
-        {/* Status Distribution */}
         <Card>
           <CardHeader>
-            <CardTitle>Estado de Deudas en el Sistema</CardTitle>
+            <CardTitle>Estado de Préstamos</CardTitle>
             <CardDescription>Distribución global por estado</CardDescription>
           </CardHeader>
           <CardContent>
             <div className="h-[300px]">
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie
-                    data={statusDistribution}
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={60}
-                    outerRadius={100}
-                    paddingAngle={2}
-                    dataKey="value"
-                    label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
-                    labelLine={false}
-                  >
-                    {statusDistribution.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={entry.color} />
-                    ))}
-                  </Pie>
-                  <Tooltip
-                    formatter={(value: number) => `${value}%`}
-                    contentStyle={{
-                      backgroundColor: "hsl(var(--card))",
-                      border: "1px solid hsl(var(--border))",
-                      borderRadius: "8px",
-                    }}
-                  />
-                </PieChart>
-              </ResponsiveContainer>
+              {loans.length > 0 ? (
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={loanStatusData}
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={60}
+                      outerRadius={100}
+                      paddingAngle={2}
+                      dataKey="value"
+                      label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                      labelLine={false}
+                    >
+                      {loanStatusData.map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={entry.color} />
+                      ))}
+                    </Pie>
+                    <Tooltip
+                      formatter={(value: number) => `${value}`}
+                      contentStyle={{
+                        backgroundColor: "hsl(var(--card))",
+                        border: "1px solid hsl(var(--border))",
+                        borderRadius: "8px",
+                      }}
+                    />
+                  </PieChart>
+                </ResponsiveContainer>
+              ) : (
+                <div className="h-full flex items-center justify-center text-muted-foreground">
+                  No hay préstamos registrados
+                </div>
+              )}
             </div>
           </CardContent>
         </Card>
       </div>
 
-      {/* Users Table and Activity */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Users Financial Overview */}
         <Card className="lg:col-span-2">
           <CardHeader className="flex flex-row items-center justify-between">
             <div>
@@ -246,232 +297,186 @@ export default function AdminDashboardPage() {
             </Link>
           </CardHeader>
           <CardContent>
-            <div className="space-y-4">
-              {userStats.usersWithDebts.slice(0, 6).map((user) => (
-                <div
-                  key={user.id}
-                  className="p-4 rounded-lg border bg-card hover:bg-muted/30 transition-colors"
-                >
-                  <div className="flex items-start gap-4">
-                    <Avatar className="h-12 w-12">
-                      <AvatarFallback className="bg-primary text-primary-foreground">
-                        {user.name
-                          .split(" ")
-                          .map((n) => n[0])
-                          .join("")}
-                      </AvatarFallback>
-                    </Avatar>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center justify-between mb-1">
-                        <div className="flex items-center gap-2">
-                          <span className="font-medium">{user.name}</span>
-                          <Badge
-                            variant="secondary"
-                            className={
-                              user.status === "active"
-                                ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300"
-                                : "bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300"
-                            }
-                          >
-                            {user.status === "active" ? "Activo" : "Inactivo"}
-                          </Badge>
-                          {user.overdueDebts > 0 && (
-                            <Badge className="bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300">
-                              {user.overdueDebts} vencida{user.overdueDebts > 1 ? "s" : ""}
-                            </Badge>
-                          )}
+            {usersWithLoans.length > 0 ? (
+              <div className="space-y-4">
+                {usersWithLoans.slice(0, 6).map((user) => (
+                  <div
+                    key={user.id}
+                    className="p-4 rounded-lg border bg-card hover:bg-muted/30 transition-colors"
+                  >
+                    <div className="flex items-start gap-4">
+                      <Avatar className="h-12 w-12">
+                        <AvatarFallback className="bg-primary text-primary-foreground">
+                          {user.display_name
+                            ? user.display_name.split(" ").map((n) => n[0]).join("")
+                            : user.email[0].toUpperCase()}
+                        </AvatarFallback>
+                      </Avatar>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between mb-1">
+                          <div className="flex items-center gap-2">
+                            <span className="font-medium">
+                              {user.display_name || user.email.split("@")[0]}
+                            </span>
+                          </div>
+                          <Link href={`/admin/users/${user.id}`}>
+                            <Button variant="outline" size="sm">
+                              <Eye className="mr-2 h-4 w-4" />
+                              Ver Detalles
+                            </Button>
+                          </Link>
                         </div>
-                        <Link href={`/admin/users/${user.id}`}>
-                          <Button variant="outline" size="sm">
-                            <Eye className="mr-2 h-4 w-4" />
-                            Ver Estadísticas
-                          </Button>
-                        </Link>
-                      </div>
-                      <p className="text-sm text-muted-foreground mb-3">{user.email}</p>
-                      
-                      <div className="space-y-2">
-                        <div className="flex items-center justify-between text-sm">
-                          <span className="text-muted-foreground">
-                            Progreso de pago ({user.debtCount} deuda{user.debtCount !== 1 ? "s" : ""})
-                          </span>
-                          <span className="font-medium">{user.paymentProgress.toFixed(1)}%</span>
-                        </div>
-                        <Progress value={user.paymentProgress} className="h-2" />
-                        <div className="flex justify-between text-sm">
-                          <span>
-                            Pagado: <span className="font-medium text-green-600">{formatCurrency(user.totalPaid)}</span>
-                          </span>
-                          <span>
-                            Pendiente: <span className="font-medium text-red-600">{formatCurrency(user.totalPending)}</span>
-                          </span>
+                        <p className="text-sm text-muted-foreground mb-3">{user.email}</p>
+                        
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between text-sm">
+                            <span className="text-muted-foreground">
+                              Préstamos ({user.loanCount})
+                            </span>
+                          </div>
+                          <div className="flex justify-between text-sm">
+                            <span>
+                              Total: <span className="font-medium">{formatCurrency(user.totalOriginal)}</span>
+                            </span>
+                            <span>
+                              Pendiente: <span className="font-medium text-red-600">{formatCurrency(user.totalPending)}</span>
+                            </span>
+                          </div>
                         </div>
                       </div>
                     </div>
                   </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            ) : (
+              <div className="text-center py-8 text-muted-foreground">
+                No hay usuarios con préstamos
+              </div>
+            )}
           </CardContent>
         </Card>
 
-        {/* Sidebar Widgets */}
         <div className="space-y-6">
-          {/* Recent Activity */}
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <Activity className="h-5 w-5 text-primary" />
-                Actividad Reciente
+                Información del Sistema
               </CardTitle>
             </CardHeader>
             <CardContent>
               <div className="space-y-4">
-                {activities.slice(0, 5).map((activity) => {
-                  const user = getUserById(activity.userId)
-                  return (
-                    <div key={activity.id} className="flex items-start gap-3">
-                      <Avatar className="h-8 w-8">
-                        <AvatarFallback className="text-xs bg-muted">
-                          {user?.name
-                            .split(" ")
-                            .map((n) => n[0])
-                            .join("")}
-                        </AvatarFallback>
-                      </Avatar>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm text-foreground truncate">
-                          {activity.description}
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                          {getRelativeTime(activity.createdAt)}
-                        </p>
-                      </div>
-                    </div>
-                  )
-                })}
+                <div className="flex items-center justify-between p-3 rounded-lg bg-muted/50">
+                  <span className="text-sm text-muted-foreground">Total Usuarios</span>
+                  <span className="font-medium">{totalUsers}</span>
+                </div>
+                <div className="flex items-center justify-between p-3 rounded-lg bg-muted/50">
+                  <span className="text-sm text-muted-foreground">Total Préstamos</span>
+                  <span className="font-medium">{loans.length}</span>
+                </div>
+                <div className="flex items-center justify-between p-3 rounded-lg bg-muted/50">
+                  <span className="text-sm text-muted-foreground">Total Pagos</span>
+                  <span className="font-medium">{payments.length}</span>
+                </div>
               </div>
             </CardContent>
           </Card>
 
-          {/* Monthly Payments Flow */}
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <Clock className="h-5 w-5 text-primary" />
                 Pagos Recientes
               </CardTitle>
-              <CardDescription>Últimos 6 meses</CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="h-[200px]">
-                <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={monthlyPayments}>
-                    <XAxis dataKey="month" className="text-xs" />
-                    <YAxis tickFormatter={(v) => `$${v / 1000}k`} className="text-xs" />
-                    <Tooltip
-                      formatter={(value: number) => formatCurrency(value)}
-                      contentStyle={{
-                        backgroundColor: "hsl(var(--card))",
-                        border: "1px solid hsl(var(--border))",
-                        borderRadius: "8px",
-                      }}
-                    />
-                    <defs>
-                      <linearGradient id="areaGradient" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor="hsl(var(--accent))" stopOpacity={0.3} />
-                        <stop offset="100%" stopColor="hsl(var(--accent))" stopOpacity={0} />
-                      </linearGradient>
-                    </defs>
-                    <Area
-                      type="monotone"
-                      dataKey="amount"
-                      stroke="hsl(var(--accent))"
-                      strokeWidth={2}
-                      fill="url(#areaGradient)"
-                    />
-                  </AreaChart>
-                </ResponsiveContainer>
-              </div>
+              {recentPayments.length > 0 ? (
+                <div className="h-[200px]">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <AreaChart data={monthlyTrendData.slice(-6)}>
+                      <XAxis dataKey="month" className="text-xs" />
+                      <YAxis tickFormatter={(v) => `$${v / 1000}k`} className="text-xs" />
+                      <Tooltip
+                        formatter={(value: number) => formatCurrency(value)}
+                        contentStyle={{
+                          backgroundColor: "hsl(var(--card))",
+                          border: "1px solid hsl(var(--border))",
+                          borderRadius: "8px",
+                        }}
+                      />
+                      <defs>
+                        <linearGradient id="areaGradient" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%" stopColor="hsl(var(--accent))" stopOpacity={0.3} />
+                          <stop offset="100%" stopColor="hsl(var(--accent))" stopOpacity={0} />
+                        </linearGradient>
+                      </defs>
+                      <Area
+                        type="monotone"
+                        dataKey="amount"
+                        stroke="hsl(var(--accent))"
+                        strokeWidth={2}
+                        fill="url(#areaGradient)"
+                      />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                </div>
+              ) : (
+                <div className="h-[200px] flex items-center justify-center text-muted-foreground">
+                  No hay pagos registrados
+                </div>
+              )}
             </CardContent>
           </Card>
         </div>
       </div>
 
-      {/* Recent Payments Table */}
       <Card>
         <CardHeader>
           <CardTitle>Pagos Recientes de Usuarios</CardTitle>
           <CardDescription>Últimos pagos registrados por los usuarios</CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr className="border-b text-left">
-                  <th className="pb-3 text-sm font-medium text-muted-foreground">Usuario</th>
-                  <th className="pb-3 text-sm font-medium text-muted-foreground">Fecha</th>
-                  <th className="pb-3 text-sm font-medium text-muted-foreground">Método</th>
-                  <th className="pb-3 text-sm font-medium text-muted-foreground">Monto</th>
-                  <th className="pb-3 text-sm font-medium text-muted-foreground">Estado</th>
-                  <th className="pb-3 text-sm font-medium text-muted-foreground">Acciones</th>
-                </tr>
-              </thead>
-              <tbody>
-                {recentPayments.map((payment) => {
-                  const user = getUserById(payment.userId)
-                  return (
+          {recentPayments.length > 0 ? (
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b text-left">
+                    <th className="pb-3 text-sm font-medium text-muted-foreground">Fecha</th>
+                    <th className="pb-3 text-sm font-medium text-muted-foreground">Monto</th>
+                    <th className="pb-3 text-sm font-medium text-muted-foreground">Estado</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {recentPayments.map((payment) => (
                     <tr key={payment.id} className="border-b last:border-0">
-                      <td className="py-3">
-                        <div className="flex items-center gap-2">
-                          <Avatar className="h-8 w-8">
-                            <AvatarFallback className="text-xs bg-primary text-primary-foreground">
-                              {user?.name
-                                .split(" ")
-                                .map((n) => n[0])
-                                .join("")}
-                            </AvatarFallback>
-                          </Avatar>
-                          <span className="text-sm font-medium">{user?.name || "N/A"}</span>
-                        </div>
-                      </td>
                       <td className="py-3 text-sm text-muted-foreground">
-                        {formatDate(payment.date)}
-                      </td>
-                      <td className="py-3 text-sm capitalize">
-                        {payment.method === "transfer" ? "Transferencia" : 
-                         payment.method === "cash" ? "Efectivo" :
-                         payment.method === "card" ? "Tarjeta" : "Cheque"}
+                        {formatDate(payment.paid_on)}
                       </td>
                       <td className="py-3 text-sm font-medium text-green-600">
-                        {formatCurrency(payment.amount)}
+                        {formatCurrency(Number(payment.amount))}
                       </td>
                       <td className="py-3">
                         <Badge
                           variant="secondary"
                           className={
-                            payment.status === "confirmed"
+                            payment.status === "paid"
                               ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300"
                               : "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-300"
                           }
                         >
-                          {payment.status === "confirmed" ? "Confirmado" : "Pendiente"}
+                          {payment.status === "paid" ? "Pagado" : "Pendiente"}
                         </Badge>
                       </td>
-                      <td className="py-3">
-                        <Link href={`/admin/users/${payment.userId}`}>
-                          <Button variant="ghost" size="sm">
-                            <Eye className="mr-2 h-4 w-4" />
-                            Ver Usuario
-                          </Button>
-                        </Link>
-                      </td>
                     </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div className="text-center py-8 text-muted-foreground">
+              No hay pagos registrados
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>

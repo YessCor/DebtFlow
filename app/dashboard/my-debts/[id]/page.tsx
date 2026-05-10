@@ -1,55 +1,169 @@
 "use client"
 
-import { useState, use } from "react"
+import { useState, useEffect, use } from "react"
 import Link from "next/link"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
-import { Textarea } from "@/components/ui/textarea"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog"
-import { FieldGroup, Field, FieldLabel } from "@/components/ui/field"
-import {
-  ArrowLeft,
-  DollarSign,
-  Calendar,
-  Percent,
-  CreditCard,
-  AlertTriangle,
-  CheckCircle,
-  Send,
-} from "lucide-react"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import { ArrowLeft, DollarSign, Calendar, Percent, CheckCircle, Trash2, Edit, Save, X } from "lucide-react"
 import { useAuth } from "@/lib/auth-context"
-import {
-  getDebtById,
-  getPaymentsByDebtId,
-  formatCurrency,
-  formatDate,
-  getStatusLabel,
-  getStatusColor,
-  getCategoryLabel,
-} from "@/lib/mock-data"
+import { supabase } from "@/lib/supabase-client"
 import { toast } from "sonner"
+
+const formatCurrency = (amount: number) => {
+  return new Intl.NumberFormat("es-US", {
+    style: "currency",
+    currency: "USD",
+  }).format(amount)
+}
+
+const formatDate = (dateString: string | null) => {
+  if (!dateString) return "N/A"
+  return new Date(dateString).toLocaleDateString("es-ES", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  })
+}
+
+interface LoanDetail {
+  id: string
+  owner_id: string
+  title: string
+  description: string | null
+  principal_amount: number
+  interest_rate: number
+  due_on: string | null
+  status: string
+  notes: string | null
+  created_at: string
+}
 
 export default function MyDebtDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params)
   const { user } = useAuth()
-  const debt = getDebtById(id)
-  const payments = debt ? getPaymentsByDebtId(debt.id) : []
+  const [loan, setLoan] = useState<LoanDetail | null>(null)
+  const [payments, setPayments] = useState<any[]>([])
+  const [loading, setLoading] = useState(true)
+  const [isEditing, setIsEditing] = useState(false)
+  const [editData, setEditData] = useState({
+    title: "",
+    description: "",
+    principal_amount: "",
+    interest_rate: "",
+    due_on: "",
+    notes: "",
+    status: "active",
+  })
 
-  const [isAdjustDialogOpen, setIsAdjustDialogOpen] = useState(false)
-  const [adjustmentReason, setAdjustmentReason] = useState("")
+  useEffect(() => {
+    if (user && id) {
+      fetchLoanDetails()
+    }
+  }, [user, id])
 
-  // Check if user owns this debt
-  if (!debt || (user && debt.userId !== user.id)) {
+  const fetchLoanDetails = async () => {
+    try {
+      const { data: loanData, error: loanError } = await supabase
+        .from("loans")
+        .select("*")
+        .eq("id", id)
+        .eq("owner_id", user!.id)
+        .single()
+
+      if (loanError) throw loanError
+
+      if (!loanData) {
+        setLoading(false)
+        return
+      }
+
+      setLoan(loanData)
+      setEditData({
+        title: loanData.title || "",
+        description: loanData.description || "",
+        principal_amount: String(loanData.principal_amount),
+        interest_rate: String(loanData.interest_rate),
+        due_on: loanData.due_on || "",
+        notes: loanData.notes || "",
+        status: loanData.status,
+      })
+
+      const { data: paymentsData } = await supabase
+        .from("payments")
+        .select("*")
+        .eq("loan_id", id)
+        .order("paid_on", { ascending: false })
+
+      setPayments(paymentsData || [])
+    } catch (err) {
+      console.error("Error fetching loan:", err)
+      toast.error("Error al cargar la deuda")
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleSaveEdit = async () => {
+    try {
+      const { error } = await supabase
+        .from("loans")
+        .update({
+          title: editData.title,
+          description: editData.description || null,
+          principal_amount: parseFloat(editData.principal_amount),
+          interest_rate: parseFloat(editData.interest_rate) || 0,
+          due_on: editData.due_on || null,
+          notes: editData.notes || null,
+          status: editData.status,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", id)
+
+      if (error) throw error
+
+      setLoan((prev) => prev ? { ...prev, ...editData, principal_amount: parseFloat(editData.principal_amount) } : null)
+      setIsEditing(false)
+      toast.success("Deuda actualizada")
+    } catch (err) {
+      console.error("Error updating loan:", err)
+      toast.error("Error al actualizar")
+    }
+  }
+
+  const handleDelete = async () => {
+    if (!confirm("¿Estás seguro de eliminar esta deuda?")) return
+
+    try {
+      const { error } = await supabase
+        .from("loans")
+        .delete()
+        .eq("id", id)
+
+      if (error) throw error
+
+      toast.success("Deuda eliminada")
+      window.location.href = "/dashboard/my-debts"
+    } catch (err) {
+      console.error("Error deleting loan:", err)
+      toast.error("Error al eliminar")
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="p-4 lg:p-6 space-y-6">
+        <div className="flex items-center justify-center h-96">
+          <p className="text-muted-foreground">Cargando...</p>
+        </div>
+      </div>
+    )
+  }
+
+  if (!loan) {
     return (
       <div className="p-6">
         <Card>
@@ -67,250 +181,222 @@ export default function MyDebtDetailPage({ params }: { params: Promise<{ id: str
     )
   }
 
-  const pending = debt.originalAmount - debt.paidAmount
-  const progress = (debt.paidAmount / debt.originalAmount) * 100
-  const interestAmount = (debt.originalAmount * debt.interestRate) / 100
-  const daysUntilDue = Math.ceil(
-    (new Date(debt.dueDate).getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24)
-  )
-  const isOverdue = daysUntilDue < 0
-  const isUrgent = daysUntilDue <= 7 && daysUntilDue >= 0
-
-  // Generate payment schedule
-  const monthlyPayment = pending / 6
-  const paymentSchedule = Array.from({ length: 6 }, (_, i) => {
-    const date = new Date()
-    date.setMonth(date.getMonth() + i + 1)
-    return {
-      number: i + 1,
-      date: date.toISOString().split("T")[0],
-      amount: monthlyPayment,
-      status: i < 2 ? "pending" : "scheduled",
-    }
-  })
-
-  const handleRequestAdjustment = () => {
-    toast.success("Solicitud de ajuste enviada al administrador")
-    setIsAdjustDialogOpen(false)
-    setAdjustmentReason("")
-  }
+  const totalPaid = payments.reduce((sum, p) => sum + Number(p.amount), 0)
+  const pending = Number(loan.principal_amount) - totalPaid
+  const progress = Number(loan.principal_amount) > 0 
+    ? (totalPaid / Number(loan.principal_amount)) * 100 
+    : 0
 
   return (
     <div className="p-4 lg:p-6 space-y-6">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div className="flex items-center gap-4">
-          <Link href="/dashboard/my-debts">
-            <Button variant="outline" size="icon">
-              <ArrowLeft className="h-4 w-4" />
-            </Button>
-          </Link>
-          <div>
-            <div className="flex items-center gap-3">
-              <h1 className="text-2xl font-bold">{debt.description}</h1>
-              <Badge className={getStatusColor(debt.status)}>
-                {getStatusLabel(debt.status)}
-              </Badge>
-            </div>
-            <p className="text-muted-foreground">{getCategoryLabel(debt.category)}</p>
-          </div>
+      <div className="flex items-center gap-4">
+        <Link href="/dashboard/my-debts">
+          <Button variant="ghost" size="icon">
+            <ArrowLeft className="h-5 w-5" />
+          </Button>
+        </Link>
+        <div className="flex-1">
+          <h1 className="text-2xl lg:text-3xl font-bold text-foreground flex items-center gap-2">
+            <DollarSign className="h-7 w-7 text-red-500" />
+            {loan.title || "Detalle de Deuda"}
+          </h1>
+          <p className="text-muted-foreground">
+            Información y pagos de tu deuda
+          </p>
         </div>
-        <Dialog open={isAdjustDialogOpen} onOpenChange={setIsAdjustDialogOpen}>
-          <DialogTrigger asChild>
-            <Button variant="outline">
-              <Send className="mr-2 h-4 w-4" />
-              Solicitar Ajuste
-            </Button>
-          </DialogTrigger>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Solicitar Ajuste</DialogTitle>
-              <DialogDescription>
-                Envía una solicitud al administrador para ajustar los términos de esta deuda
-              </DialogDescription>
-            </DialogHeader>
-            <FieldGroup className="py-4">
-              <Field>
-                <FieldLabel>Motivo de la solicitud *</FieldLabel>
-                <Textarea
-                  value={adjustmentReason}
-                  onChange={(e) => setAdjustmentReason(e.target.value)}
-                  placeholder="Explica por qué necesitas un ajuste en los términos de pago..."
-                  rows={4}
-                />
-              </Field>
-            </FieldGroup>
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setIsAdjustDialogOpen(false)}>
+        <div className="flex gap-2">
+          {isEditing ? (
+            <>
+              <Button variant="outline" onClick={() => setIsEditing(false)}>
+                <X className="mr-2 h-4 w-4" />
                 Cancelar
               </Button>
-              <Button onClick={handleRequestAdjustment}>Enviar Solicitud</Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-      </div>
-
-      {/* Alert if overdue or urgent */}
-      {(isOverdue || isUrgent) && (
-        <div
-          className={`p-4 rounded-lg border flex items-start gap-3 ${
-            isOverdue
-              ? "bg-red-50 border-red-200 dark:bg-red-900/20 dark:border-red-800"
-              : "bg-yellow-50 border-yellow-200 dark:bg-yellow-900/20 dark:border-yellow-800"
-          }`}
-        >
-          <AlertTriangle
-            className={`h-5 w-5 mt-0.5 ${
-              isOverdue
-                ? "text-red-600 dark:text-red-400"
-                : "text-yellow-600 dark:text-yellow-400"
-            }`}
-          />
-          <div>
-            <p
-              className={`font-medium ${
-                isOverdue
-                  ? "text-red-800 dark:text-red-300"
-                  : "text-yellow-800 dark:text-yellow-300"
-              }`}
-            >
-              {isOverdue ? "Deuda Vencida" : "Deuda Próxima a Vencer"}
-            </p>
-            <p
-              className={`text-sm ${
-                isOverdue
-                  ? "text-red-700 dark:text-red-400"
-                  : "text-yellow-700 dark:text-yellow-400"
-              }`}
-            >
-              {isOverdue
-                ? `Esta deuda venció hace ${Math.abs(daysUntilDue)} días. Por favor realiza el pago lo antes posible para evitar cargos adicionales.`
-                : `Esta deuda vence en ${daysUntilDue} días. Recuerda realizar el pago a tiempo.`}
-            </p>
-          </div>
+              <Button onClick={handleSaveEdit}>
+                <Save className="mr-2 h-4 w-4" />
+                Guardar
+              </Button>
+            </>
+          ) : (
+            <>
+              <Button variant="outline" onClick={() => setIsEditing(true)}>
+                <Edit className="mr-2 h-4 w-4" />
+                Editar
+              </Button>
+              <Button variant="destructive" onClick={handleDelete}>
+                <Trash2 className="mr-2 h-4 w-4" />
+                Eliminar
+              </Button>
+            </>
+          )}
         </div>
-      )}
-
-      {/* Financial Summary Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <Card>
-          <CardContent className="p-4">
-            <div className="flex items-center gap-3">
-              <div className="p-2 rounded-lg bg-blue-100 dark:bg-blue-900/30">
-                <DollarSign className="h-5 w-5 text-blue-600 dark:text-blue-400" />
-              </div>
-              <div>
-                <p className="text-sm text-muted-foreground">Monto Original</p>
-                <p className="text-xl font-bold">{formatCurrency(debt.originalAmount)}</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4">
-            <div className="flex items-center gap-3">
-              <div className="p-2 rounded-lg bg-green-100 dark:bg-green-900/30">
-                <CheckCircle className="h-5 w-5 text-green-600 dark:text-green-400" />
-              </div>
-              <div>
-                <p className="text-sm text-muted-foreground">Pagado</p>
-                <p className="text-xl font-bold">{formatCurrency(debt.paidAmount)}</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4">
-            <div className="flex items-center gap-3">
-              <div className="p-2 rounded-lg bg-red-100 dark:bg-red-900/30">
-                <CreditCard className="h-5 w-5 text-red-600 dark:text-red-400" />
-              </div>
-              <div>
-                <p className="text-sm text-muted-foreground">Pendiente</p>
-                <p className="text-xl font-bold">{formatCurrency(pending)}</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4">
-            <div className="flex items-center gap-3">
-              <div className="p-2 rounded-lg bg-yellow-100 dark:bg-yellow-900/30">
-                <Percent className="h-5 w-5 text-yellow-600 dark:text-yellow-400" />
-              </div>
-              <div>
-                <p className="text-sm text-muted-foreground">Intereses</p>
-                <p className="text-xl font-bold">{debt.interestRate}%</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
       </div>
 
-      {/* Progress */}
-      <Card>
-        <CardContent className="p-6">
-          <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <span className="text-sm font-medium">Progreso de pago</span>
-              <span className="text-sm font-bold">{progress.toFixed(1)}%</span>
-            </div>
-            <Progress value={progress} className="h-3" />
-            <div className="flex justify-between text-sm text-muted-foreground">
-              <span>Pagado: {formatCurrency(debt.paidAmount)}</span>
-              <span>Restante: {formatCurrency(pending)}</span>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Payment Schedule */}
-        <Card>
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <Card className="lg:col-span-2">
           <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Calendar className="h-5 w-5 text-primary" />
-              Cronograma de Pagos
-            </CardTitle>
-            <CardDescription>Plan de pagos sugerido</CardDescription>
+            <CardTitle>Información de la Deuda</CardTitle>
           </CardHeader>
-          <CardContent>
+          <CardContent className="space-y-4">
+            {isEditing ? (
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <Label>Nombre</Label>
+                  <Input
+                    value={editData.title}
+                    onChange={(e) => setEditData({ ...editData, title: e.target.value })}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Descripción</Label>
+                  <Input
+                    value={editData.description}
+                    onChange={(e) => setEditData({ ...editData, description: e.target.value })}
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label>Monto</Label>
+                    <Input
+                      type="number"
+                      value={editData.principal_amount}
+                      onChange={(e) => setEditData({ ...editData, principal_amount: e.target.value })}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Interés (%)</Label>
+                    <Input
+                      type="number"
+                      value={editData.interest_rate}
+                      onChange={(e) => setEditData({ ...editData, interest_rate: e.target.value })}
+                    />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label>Fecha Vencimiento</Label>
+                    <Input
+                      type="date"
+                      value={editData.due_on}
+                      onChange={(e) => setEditData({ ...editData, due_on: e.target.value })}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Estado</Label>
+                    <select
+                      className="w-full px-3 py-2 rounded-md border bg-background"
+                      value={editData.status}
+                      onChange={(e) => setEditData({ ...editData, status: e.target.value })}
+                    >
+                      <option value="active">Activa</option>
+                      <option value="closed">Cerrada</option>
+                      <option value="canceled">Cancelada</option>
+                    </select>
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <Label>Notas</Label>
+                  <Input
+                    value={editData.notes}
+                    onChange={(e) => setEditData({ ...editData, notes: e.target.value })}
+                  />
+                </div>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="p-4 rounded-lg bg-muted/50">
+                  <p className="text-sm text-muted-foreground">Descripción</p>
+                  <p className="font-medium">{loan.description || "Sin descripción"}</p>
+                </div>
+                <div className="p-4 rounded-lg bg-muted/50">
+                  <p className="text-sm text-muted-foreground">Tasa de Interés</p>
+                  <p className="font-medium">{loan.interest_rate}%</p>
+                </div>
+                <div className="p-4 rounded-lg bg-muted/50">
+                  <p className="text-sm text-muted-foreground">Fecha de Vencimiento</p>
+                  <p className="font-medium">{formatDate(loan.due_on)}</p>
+                </div>
+                <div className="p-4 rounded-lg bg-muted/50">
+                  <p className="text-sm text-muted-foreground">Estado</p>
+                  <Badge
+                    variant="secondary"
+                    className={
+                      loan.status === "active"
+                        ? "bg-orange-100 text-orange-800"
+                        : "bg-green-100 text-green-800"
+                    }
+                  >
+                    {loan.status === "active" ? "Activa" : "Cerrada"}
+                  </Badge>
+                </div>
+                {loan.notes && (
+                  <div className="sm:col-span-2 p-4 rounded-lg bg-muted/50">
+                    <p className="text-sm text-muted-foreground">Notas</p>
+                    <p className="font-medium">{loan.notes}</p>
+                  </div>
+                )}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        <div className="space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>Resumen de Pagos</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="text-center">
+                <p className="text-3xl font-bold text-red-600">
+                  {formatCurrency(Number(loan.principal_amount))}
+                </p>
+                <p className="text-sm text-muted-foreground">Monto Total</p>
+              </div>
+              <Progress value={progress} className="h-3" />
+              <div className="flex justify-between text-sm">
+                <span className="text-green-600">Pagado: {formatCurrency(totalPaid)}</span>
+                <span className="text-red-600">Pendiente: {formatCurrency(pending)}</span>
+              </div>
+              <div className="text-center text-sm text-muted-foreground">
+                {progress.toFixed(1)}% completado
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Historial de Pagos</CardTitle>
+          <CardDescription>
+            {payments.length} pagos registrados
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {payments.length > 0 ? (
             <div className="overflow-x-auto">
               <table className="w-full">
                 <thead>
-                  <tr className="border-b">
-                    <th className="pb-3 text-left text-sm font-medium text-muted-foreground">
-                      Cuota
-                    </th>
-                    <th className="pb-3 text-left text-sm font-medium text-muted-foreground">
-                      Fecha
-                    </th>
-                    <th className="pb-3 text-left text-sm font-medium text-muted-foreground">
-                      Monto
-                    </th>
-                    <th className="pb-3 text-left text-sm font-medium text-muted-foreground">
-                      Estado
-                    </th>
+                  <tr className="border-b text-left">
+                    <th className="pb-3 text-sm font-medium text-muted-foreground">Fecha</th>
+                    <th className="pb-3 text-sm font-medium text-muted-foreground">Monto</th>
+                    <th className="pb-3 text-sm font-medium text-muted-foreground">Estado</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {paymentSchedule.map((payment) => (
-                    <tr key={payment.number} className="border-b last:border-0">
-                      <td className="py-3 text-sm">#{payment.number}</td>
-                      <td className="py-3 text-sm">{formatDate(payment.date)}</td>
-                      <td className="py-3 text-sm font-medium">
-                        {formatCurrency(payment.amount)}
+                  {payments.map((payment) => (
+                    <tr key={payment.id} className="border-b last:border-0">
+                      <td className="py-3 text-sm">
+                        {formatDate(payment.paid_on)}
+                      </td>
+                      <td className="py-3 text-sm font-medium text-green-600">
+                        {formatCurrency(Number(payment.amount))}
                       </td>
                       <td className="py-3">
                         <Badge
                           variant="secondary"
-                          className={
-                            payment.status === "pending"
-                              ? "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-300"
-                              : "bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300"
-                          }
+                          className="bg-green-100 text-green-800"
                         >
-                          {payment.status === "pending" ? "Próximo" : "Programado"}
+                          {payment.status === "paid" ? "Pagado" : "Pendiente"}
                         </Badge>
                       </td>
                     </tr>
@@ -318,82 +404,9 @@ export default function MyDebtDetailPage({ params }: { params: Promise<{ id: str
                 </tbody>
               </table>
             </div>
-          </CardContent>
-        </Card>
-
-        {/* Payment History */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Historial de Pagos</CardTitle>
-            <CardDescription>Pagos realizados para esta deuda</CardDescription>
-          </CardHeader>
-          <CardContent>
-            {payments.length > 0 ? (
-              <div className="space-y-4">
-                {payments.map((payment) => (
-                  <div
-                    key={payment.id}
-                    className="flex items-center justify-between p-3 rounded-lg bg-muted/50"
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-full bg-green-100 dark:bg-green-900/30 flex items-center justify-center">
-                        <CheckCircle className="h-5 w-5 text-green-600 dark:text-green-400" />
-                      </div>
-                      <div>
-                        <p className="font-medium">{formatCurrency(payment.amount)}</p>
-                        <p className="text-sm text-muted-foreground">
-                          {formatDate(payment.date)}
-                        </p>
-                      </div>
-                    </div>
-                    <Badge
-                      variant="secondary"
-                      className="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300"
-                    >
-                      Confirmado
-                    </Badge>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="text-center py-8 text-muted-foreground">
-                No hay pagos registrados para esta deuda
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Debt Details */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Detalles de la Deuda</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            <div>
-              <p className="text-sm text-muted-foreground">Categoría</p>
-              <p className="font-medium">{getCategoryLabel(debt.category)}</p>
-            </div>
-            <div>
-              <p className="text-sm text-muted-foreground">Tasa de Interés</p>
-              <p className="font-medium">{debt.interestRate}%</p>
-            </div>
-            <div>
-              <p className="text-sm text-muted-foreground">Fecha de Inicio</p>
-              <p className="font-medium">{formatDate(debt.startDate)}</p>
-            </div>
-            <div>
-              <p className="text-sm text-muted-foreground">Fecha de Vencimiento</p>
-              <p className={`font-medium ${isOverdue ? "text-red-600" : ""}`}>
-                {formatDate(debt.dueDate)}
-              </p>
-            </div>
-          </div>
-          {debt.notes && (
-            <div className="mt-4 pt-4 border-t">
-              <p className="text-sm text-muted-foreground mb-1">Notas</p>
-              <p className="text-sm">{debt.notes}</p>
+          ) : (
+            <div className="text-center py-8 text-muted-foreground">
+              No hay pagos registrados
             </div>
           )}
         </CardContent>

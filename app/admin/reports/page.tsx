@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import {
@@ -17,14 +17,11 @@ import {
   TrendingUp,
   Calendar,
   BarChart3,
+  Users,
+  CreditCard,
+  AlertTriangle,
 } from "lucide-react"
-import {
-  debts,
-  payments,
-  formatCurrency,
-  categoryDistribution,
-  adminKPIs,
-} from "@/lib/mock-data"
+import { getAdminStats, getAllLoans, getAllPayments, getAllUsers } from "@/lib/supabase-admin"
 import {
   BarChart,
   Bar,
@@ -34,125 +31,150 @@ import {
   Tooltip,
   Legend,
   ResponsiveContainer,
+  PieChart,
+  Pie,
+  Cell,
+  LineChart,
+  Line,
 } from "recharts"
 import { toast } from "sonner"
 
+const formatCurrency = (amount: number) => {
+  return new Intl.NumberFormat("es-US", {
+    style: "currency",
+    currency: "USD",
+  }).format(amount)
+}
+
+const COLORS = ["#3B82F6", "#10B981", "#EF4444", "#F59E0B", "#8B5CF6", "#EC4899"]
+
 export default function AdminReportsPage() {
   const [period, setPeriod] = useState("month")
+  const [loading, setLoading] = useState(true)
+  const [stats, setStats] = useState({
+    totalUsers: 0,
+    totalLoans: 0,
+    activeLoans: 0,
+    totalPending: 0,
+    totalPaid: 0,
+    unreadNotifications: 0,
+  })
+  const [loans, setLoans] = useState<any[]>([])
+  const [payments, setPayments] = useState<any[]>([])
+  const [users, setUsers] = useState<any[]>([])
 
-  // Calculate report data
-  const totalCollected = payments.reduce((sum, p) => sum + p.amount, 0)
-  const projectedCollection = adminKPIs.totalPendingAmount * 0.85
-  const collectionRate = (totalCollected / (totalCollected + adminKPIs.totalPendingAmount)) * 100
-  const newDebts = debts.filter((d) => {
-    const startDate = new Date(d.startDate)
-    const monthAgo = new Date()
-    monthAgo.setMonth(monthAgo.getMonth() - 1)
-    return startDate > monthAgo
-  }).length
-  const avgOverdueDays = 15
+  useEffect(() => {
+    fetchData()
+  }, [])
 
-  // Category performance data
-  const categoryPerformance = [
-    {
-      category: "Tarjeta de Crédito",
-      totalDebts: 12,
-      totalAmount: 85000,
-      collected: 45000,
-      pending: 40000,
-      collectionRate: 53,
-    },
-    {
-      category: "Préstamo Personal",
-      totalDebts: 15,
-      totalAmount: 65000,
-      collected: 35000,
-      pending: 30000,
-      collectionRate: 54,
-    },
-    {
-      category: "Hipoteca",
-      totalDebts: 8,
-      totalAmount: 120000,
-      collected: 60000,
-      pending: 60000,
-      collectionRate: 50,
-    },
-    {
-      category: "Auto",
-      totalDebts: 7,
-      totalAmount: 45000,
-      collected: 38000,
-      pending: 7000,
-      collectionRate: 84,
-    },
-    {
-      category: "Otro",
-      totalDebts: 5,
-      totalAmount: 25000,
-      collected: 12000,
-      pending: 13000,
-      collectionRate: 48,
-    },
-  ]
-
-  // Comparison chart data
-  const comparisonData = [
-    { month: "Jul", collected: 18000, projected: 20000 },
-    { month: "Ago", collected: 21000, projected: 22000 },
-    { month: "Sep", collected: 24000, projected: 23000 },
-    { month: "Oct", collected: 26000, projected: 25000 },
-    { month: "Nov", collected: 28000, projected: 27000 },
-    { month: "Dic", collected: 30000, projected: 30000 },
-  ]
-
-  const handleExport = (format: string) => {
-    toast.success(`Reporte exportado en formato ${format.toUpperCase()}`)
+  const fetchData = async () => {
+    try {
+      const [statsData, loansData, paymentsData, usersData] = await Promise.all([
+        getAdminStats(),
+        getAllLoans(),
+        getAllPayments(),
+        getAllUsers(),
+      ])
+      setStats(statsData)
+      setLoans(loansData)
+      setPayments(paymentsData)
+      setUsers(usersData)
+    } catch (err) {
+      console.error("Error fetching report data:", err)
+      toast.error("Error al cargar los datos")
+    } finally {
+      setLoading(false)
+    }
   }
+
+  if (loading) {
+    return (
+      <div className="p-4 lg:p-6 space-y-6">
+        <div className="flex items-center justify-center h-96">
+          <p className="text-muted-foreground">Cargando reportes...</p>
+        </div>
+      </div>
+    )
+  }
+
+  const totalCollected = payments
+    .filter(p => p.status === "paid")
+    .reduce((sum, p) => sum + Number(p.amount), 0)
+  
+  const totalPending = loans
+    .filter(l => l.status === "active")
+    .reduce((sum, l) => sum + Number(l.principal_amount), 0)
+  
+  const collectionRate = totalPending + totalCollected > 0 
+    ? (totalCollected / (totalPending + totalCollected)) * 100 
+    : 0
+
+  const activeLoans = loans.filter(l => l.status === "active").length
+  const closedLoans = loans.filter(l => l.status === "closed").length
+
+  const directionData = [
+    { name: "Préstamos Dados", value: loans.filter(l => l.direction === "given").length },
+    { name: "Préstamos Recibidos", value: loans.filter(l => l.direction === "received").length },
+  ]
+
+  const statusData = [
+    { name: "Activos", value: activeLoans, color: "#3B82F6" },
+    { name: "Cerrados", value: closedLoans, color: "#10B981" },
+    { name: "Cancelados", value: loans.filter(l => l.status === "canceled").length, color: "#EF4444" },
+  ]
+
+  const monthlyPaymentsData = payments
+    .filter(p => p.status === "paid")
+    .reduce((acc: Record<string, number>, payment) => {
+      const month = new Date(payment.paid_on).toLocaleString("es-ES", { month: "short", year: "numeric" })
+      acc[month] = (acc[month] || 0) + Number(payment.amount)
+      return acc
+    }, {})
+
+  const paymentsTrend = Object.entries(monthlyPaymentsData)
+    .map(([month, amount]) => ({ month, amount }))
+    .sort((a, b) => a.month.localeCompare(b.month))
+    .slice(-12)
+
+  const userRoleData = [
+    { name: "Administradores", value: users.filter(u => u.role === "admin").length },
+    { name: "Usuarios", value: users.filter(u => u.role === "user").length },
+  ]
 
   return (
     <div className="p-4 lg:p-6 space-y-6">
-      {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h1 className="text-2xl lg:text-3xl font-bold text-foreground flex items-center gap-2">
-            <FileText className="h-7 w-7 text-primary" />
-            Reportes y Estadísticas
-          </h1>
-          <p className="text-muted-foreground">
-            Análisis detallado del rendimiento del sistema
-          </p>
+          <h1 className="text-2xl lg:text-3xl font-bold text-foreground">Reportes y Estadísticas</h1>
+          <p className="text-muted-foreground">Análisis completo del sistema</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex gap-2">
           <Select value={period} onValueChange={setPeriod}>
             <SelectTrigger className="w-[180px]">
-              <SelectValue placeholder="Período" />
+              <Calendar className="mr-2 h-4 w-4" />
+              <SelectValue placeholder="Periodo" />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="week">Última semana</SelectItem>
               <SelectItem value="month">Último mes</SelectItem>
               <SelectItem value="quarter">Último trimestre</SelectItem>
-              <SelectItem value="year">Año actual</SelectItem>
+              <SelectItem value="year">Último año</SelectItem>
+              <SelectItem value="all">Todo el tiempo</SelectItem>
             </SelectContent>
           </Select>
-          <Button variant="outline" onClick={() => handleExport("pdf")}>
+          <Button variant="outline">
             <Download className="mr-2 h-4 w-4" />
-            PDF
-          </Button>
-          <Button variant="outline" onClick={() => handleExport("excel")}>
-            <Download className="mr-2 h-4 w-4" />
-            Excel
+            Exportar
           </Button>
         </div>
       </div>
 
-      {/* Executive Summary */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <Card>
           <CardContent className="p-4">
             <div className="flex items-center gap-3">
-              <div className="p-2 rounded-lg bg-green-100 dark:bg-green-900/30">
-                <DollarSign className="h-5 w-5 text-green-600 dark:text-green-400" />
+              <div className="p-3 rounded-xl bg-blue-100 dark:bg-blue-900/30">
+                <DollarSign className="h-6 w-6 text-blue-600 dark:text-blue-400" />
               </div>
               <div>
                 <p className="text-sm text-muted-foreground">Total Recaudado</p>
@@ -161,11 +183,26 @@ export default function AdminReportsPage() {
             </div>
           </CardContent>
         </Card>
+
         <Card>
           <CardContent className="p-4">
             <div className="flex items-center gap-3">
-              <div className="p-2 rounded-lg bg-blue-100 dark:bg-blue-900/30">
-                <TrendingUp className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+              <div className="p-3 rounded-xl bg-red-100 dark:bg-red-900/30">
+                <AlertTriangle className="h-6 w-6 text-red-600 dark:text-red-400" />
+              </div>
+              <div>
+                <p className="text-sm text-muted-foreground">Pendiente por Cobrar</p>
+                <p className="text-xl font-bold">{formatCurrency(totalPending)}</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent className="p-4">
+            <div className="flex items-center gap-3">
+              <div className="p-3 rounded-xl bg-green-100 dark:bg-green-900/30">
+                <TrendingUp className="h-6 w-6 text-green-600 dark:text-green-400" />
               </div>
               <div>
                 <p className="text-sm text-muted-foreground">Tasa de Cobro</p>
@@ -174,200 +211,230 @@ export default function AdminReportsPage() {
             </div>
           </CardContent>
         </Card>
+
         <Card>
           <CardContent className="p-4">
             <div className="flex items-center gap-3">
-              <div className="p-2 rounded-lg bg-yellow-100 dark:bg-yellow-900/30">
-                <BarChart3 className="h-5 w-5 text-yellow-600 dark:text-yellow-400" />
+              <div className="p-3 rounded-xl bg-purple-100 dark:bg-purple-900/30">
+                <Users className="h-6 w-6 text-purple-600 dark:text-purple-400" />
               </div>
               <div>
-                <p className="text-sm text-muted-foreground">Deudas Nuevas</p>
-                <p className="text-xl font-bold">{newDebts}</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4">
-            <div className="flex items-center gap-3">
-              <div className="p-2 rounded-lg bg-red-100 dark:bg-red-900/30">
-                <Calendar className="h-5 w-5 text-red-600 dark:text-red-400" />
-              </div>
-              <div>
-                <p className="text-sm text-muted-foreground">Días Mora Promedio</p>
-                <p className="text-xl font-bold">{avgOverdueDays} días</p>
+                <p className="text-sm text-muted-foreground">Total Usuarios</p>
+                <p className="text-xl font-bold">{users.length}</p>
               </div>
             </div>
           </CardContent>
         </Card>
       </div>
 
-      {/* Charts */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Collection vs Projected */}
         <Card>
           <CardHeader>
-            <CardTitle>Cobros vs Proyectado</CardTitle>
-            <CardDescription>Comparación de monto cobrado real vs meta</CardDescription>
+            <CardTitle className="flex items-center gap-2">
+              <TrendingUp className="h-5 w-5 text-primary" />
+              Tendencia de Pagos
+            </CardTitle>
+            <CardDescription>Monto recibido por mes</CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="h-[350px]">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={comparisonData}>
-                  <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                  <XAxis dataKey="month" className="text-xs" />
-                  <YAxis tickFormatter={(v) => `$${v / 1000}k`} className="text-xs" />
-                  <Tooltip
-                    formatter={(value: number) => formatCurrency(value)}
-                    contentStyle={{
-                      backgroundColor: "hsl(var(--card))",
-                      border: "1px solid hsl(var(--border))",
-                      borderRadius: "8px",
-                    }}
-                  />
-                  <Legend />
-                  <Bar
-                    dataKey="collected"
-                    name="Cobrado"
-                    fill="#10B981"
-                    radius={[4, 4, 0, 0]}
-                  />
-                  <Bar
-                    dataKey="projected"
-                    name="Proyectado"
-                    fill="#1A56DB"
-                    radius={[4, 4, 0, 0]}
-                  />
-                </BarChart>
-              </ResponsiveContainer>
+            <div className="h-[300px]">
+              {paymentsTrend.length > 0 ? (
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={paymentsTrend}>
+                    <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                    <XAxis dataKey="month" className="text-xs" />
+                    <YAxis tickFormatter={(v) => `$${(v/1000).toFixed(0)}k`} className="text-xs" />
+                    <Tooltip
+                      formatter={(value: number) => [formatCurrency(value), "Monto"]}
+                      contentStyle={{
+                        backgroundColor: "hsl(var(--card))",
+                        border: "1px solid hsl(var(--border))",
+                        borderRadius: "8px",
+                      }}
+                    />
+                    <Line
+                      type="monotone"
+                      dataKey="amount"
+                      stroke="hsl(var(--primary))"
+                      strokeWidth={2}
+                      dot={{ fill: "hsl(var(--primary))" }}
+                    />
+                  </LineChart>
+                </ResponsiveContainer>
+              ) : (
+                <div className="h-full flex items-center justify-center text-muted-foreground">
+                  No hay datos de pagos
+                </div>
+              )}
             </div>
           </CardContent>
         </Card>
 
-        {/* Category Distribution */}
         <Card>
           <CardHeader>
-            <CardTitle>Distribución por Categoría</CardTitle>
-            <CardDescription>Montos totales por tipo de deuda</CardDescription>
+            <CardTitle className="flex items-center gap-2">
+              <BarChart3 className="h-5 w-5 text-primary" />
+              Estado de Préstamos
+            </CardTitle>
+            <CardDescription>Distribución por estado</CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="h-[350px]">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={categoryDistribution} layout="vertical">
-                  <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                  <XAxis
-                    type="number"
-                    tickFormatter={(v) => `$${v / 1000}k`}
-                    className="text-xs"
-                  />
-                  <YAxis dataKey="category" type="category" width={120} className="text-xs" />
-                  <Tooltip
-                    formatter={(value: number) => formatCurrency(value)}
-                    contentStyle={{
-                      backgroundColor: "hsl(var(--card))",
-                      border: "1px solid hsl(var(--border))",
-                      borderRadius: "8px",
-                    }}
-                  />
-                  <Bar dataKey="amount" fill="#1A56DB" radius={[0, 4, 4, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
+            <div className="h-[300px]">
+              {loans.length > 0 ? (
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={statusData}
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={60}
+                      outerRadius={100}
+                      paddingAngle={2}
+                      dataKey="value"
+                      label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                      labelLine={false}
+                    >
+                      {statusData.map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={entry.color} />
+                      ))}
+                    </Pie>
+                    <Tooltip
+                      formatter={(value: number) => `${value}`}
+                      contentStyle={{
+                        backgroundColor: "hsl(var(--card))",
+                        border: "1px solid hsl(var(--border))",
+                        borderRadius: "8px",
+                      }}
+                    />
+                    <Legend />
+                  </PieChart>
+                </ResponsiveContainer>
+              ) : (
+                <div className="h-full flex items-center justify-center text-muted-foreground">
+                  No hay préstamos registrados
+                </div>
+              )}
             </div>
           </CardContent>
         </Card>
       </div>
 
-      {/* Performance Table */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Users className="h-5 w-5 text-primary" />
+              Distribución de Usuarios
+            </CardTitle>
+            <CardDescription>Por tipo de rol</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="h-[300px]">
+              {users.length > 0 ? (
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={userRoleData}
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={60}
+                      outerRadius={100}
+                      paddingAngle={2}
+                      dataKey="value"
+                      label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                      labelLine={false}
+                    >
+                      {userRoleData.map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                      ))}
+                    </Pie>
+                    <Tooltip
+                      formatter={(value: number) => `${value}`}
+                      contentStyle={{
+                        backgroundColor: "hsl(var(--card))",
+                        border: "1px solid hsl(var(--border))",
+                        borderRadius: "8px",
+                      }}
+                    />
+                    <Legend />
+                  </PieChart>
+                </ResponsiveContainer>
+              ) : (
+                <div className="h-full flex items-center justify-center text-muted-foreground">
+                  No hay usuarios registrados
+                </div>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <CreditCard className="h-5 w-5 text-primary" />
+              Préstamos por Dirección
+            </CardTitle>
+            <CardDescription>Dados vs Recibidos</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="h-[300px]">
+              {loans.length > 0 ? (
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={directionData}>
+                    <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                    <XAxis dataKey="name" className="text-xs" />
+                    <YAxis className="text-xs" />
+                    <Tooltip
+                      formatter={(value: number) => [`${value} préstamos`, "Cantidad"]}
+                      contentStyle={{
+                        backgroundColor: "hsl(var(--card))",
+                        border: "1px solid hsl(var(--border))",
+                        borderRadius: "8px",
+                      }}
+                    />
+                    <Bar dataKey="value" fill="hsl(var(--primary))" radius={[4, 4, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              ) : (
+                <div className="h-full flex items-center justify-center text-muted-foreground">
+                  No hay préstamos registrados
+                </div>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
       <Card>
         <CardHeader>
-          <CardTitle>Rendimiento por Categoría</CardTitle>
-          <CardDescription>
-            Análisis detallado de cada categoría de deuda
-          </CardDescription>
+          <CardTitle className="flex items-center gap-2">
+            <FileText className="h-5 w-5 text-primary" />
+            Resumen Ejecutivo
+          </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr className="border-b">
-                  <th className="pb-3 text-left text-sm font-medium text-muted-foreground">
-                    Categoría
-                  </th>
-                  <th className="pb-3 text-left text-sm font-medium text-muted-foreground">
-                    Total Deudas
-                  </th>
-                  <th className="pb-3 text-left text-sm font-medium text-muted-foreground">
-                    Monto Total
-                  </th>
-                  <th className="pb-3 text-left text-sm font-medium text-muted-foreground">
-                    Cobrado
-                  </th>
-                  <th className="pb-3 text-left text-sm font-medium text-muted-foreground">
-                    Pendiente
-                  </th>
-                  <th className="pb-3 text-left text-sm font-medium text-muted-foreground">
-                    % Cobro
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {categoryPerformance.map((cat, index) => (
-                  <tr key={index} className="border-b last:border-0">
-                    <td className="py-4 text-sm font-medium">{cat.category}</td>
-                    <td className="py-4 text-sm">{cat.totalDebts}</td>
-                    <td className="py-4 text-sm">{formatCurrency(cat.totalAmount)}</td>
-                    <td className="py-4 text-sm text-green-600">
-                      {formatCurrency(cat.collected)}
-                    </td>
-                    <td className="py-4 text-sm text-red-600">
-                      {formatCurrency(cat.pending)}
-                    </td>
-                    <td className="py-4">
-                      <div className="flex items-center gap-2">
-                        <div className="w-20 h-2 rounded-full bg-muted overflow-hidden">
-                          <div
-                            className="h-full bg-primary rounded-full"
-                            style={{ width: `${cat.collectionRate}%` }}
-                          />
-                        </div>
-                        <span className="text-sm font-medium">{cat.collectionRate}%</span>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-              <tfoot>
-                <tr className="border-t-2">
-                  <td className="py-4 text-sm font-bold">Total</td>
-                  <td className="py-4 text-sm font-bold">
-                    {categoryPerformance.reduce((sum, c) => sum + c.totalDebts, 0)}
-                  </td>
-                  <td className="py-4 text-sm font-bold">
-                    {formatCurrency(
-                      categoryPerformance.reduce((sum, c) => sum + c.totalAmount, 0)
-                    )}
-                  </td>
-                  <td className="py-4 text-sm font-bold text-green-600">
-                    {formatCurrency(
-                      categoryPerformance.reduce((sum, c) => sum + c.collected, 0)
-                    )}
-                  </td>
-                  <td className="py-4 text-sm font-bold text-red-600">
-                    {formatCurrency(
-                      categoryPerformance.reduce((sum, c) => sum + c.pending, 0)
-                    )}
-                  </td>
-                  <td className="py-4 text-sm font-bold">
-                    {(
-                      (categoryPerformance.reduce((sum, c) => sum + c.collected, 0) /
-                        categoryPerformance.reduce((sum, c) => sum + c.totalAmount, 0)) *
-                      100
-                    ).toFixed(1)}
-                    %
-                  </td>
-                </tr>
-              </tfoot>
-            </table>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            <div className="p-4 rounded-lg bg-muted/50">
+              <h4 className="font-medium mb-2">Total Préstamos</h4>
+              <p className="text-2xl font-bold">{loans.length}</p>
+              <p className="text-sm text-muted-foreground">
+                {activeLoans} activos, {closedLoans} cerrados
+              </p>
+            </div>
+            <div className="p-4 rounded-lg bg-muted/50">
+              <h4 className="font-medium mb-2">Total Pagos</h4>
+              <p className="text-2xl font-bold">{payments.length}</p>
+              <p className="text-sm text-muted-foreground">
+                {payments.filter(p => p.status === "paid").length} completados
+              </p>
+            </div>
+            <div className="p-4 rounded-lg bg-muted/50">
+              <h4 className="font-medium mb-2">Monto Promedio</h4>
+              <p className="text-2xl font-bold">
+                {formatCurrency(loans.length > 0 ? totalPending / activeLoans : 0)}
+              </p>
+              <p className="text-sm text-muted-foreground">por préstamo activo</p>
+            </div>
           </div>
         </CardContent>
       </Card>

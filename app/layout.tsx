@@ -42,7 +42,7 @@ export default function RootLayout({
       <body className="font-sans antialiased bg-background">
         <ThemeProvider
           attribute="class"
-          defaultTheme="system"
+          defaultTheme="dark"
           enableSystem
           disableTransitionOnChange
         >

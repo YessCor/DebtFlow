@@ -18,6 +18,8 @@ import {
 import { toast } from "sonner"
 import { DollarSign, ArrowLeft, Briefcase, Gift, PiggyBank, Laptop, Banknote, TrendingUp } from "lucide-react"
 import Link from "next/link"
+import { useAuth } from "@/lib/auth-context"
+import { createIncome } from "@/lib/supabase-admin"
 
 const incomeSources = [
   { value: "salary", label: "Salario", icon: Briefcase },
@@ -37,6 +39,7 @@ const recurringOptions = [
 
 export default function NewIncomePage() {
   const router = useRouter()
+  const { user } = useAuth()
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [formData, setFormData] = useState({
     source: "",
@@ -51,6 +54,11 @@ export default function NewIncomePage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
 
+    if (!user) {
+      toast.error("Debes iniciar sesión")
+      return
+    }
+
     if (!formData.source || !formData.description || !formData.amount || !formData.date) {
       toast.error("Por favor completa los campos requeridos")
       return
@@ -63,10 +71,26 @@ export default function NewIncomePage() {
 
     setIsSubmitting(true)
 
-    await new Promise(resolve => setTimeout(resolve, 1000))
+    try {
+      await createIncome({
+        owner_id: user.id,
+        source: formData.source,
+        description: formData.description,
+        amount: parseFloat(formData.amount),
+        date: formData.date,
+        recurring: formData.recurring,
+        recurring_period: formData.recurringPeriod || null,
+        notes: formData.notes || null,
+      })
 
-    toast.success("Ingreso registrado exitosamente")
-    router.push("/dashboard/my-incomes")
+      toast.success("Ingreso registrado exitosamente")
+      router.push("/dashboard/my-incomes")
+    } catch (err) {
+      console.error("Error creating income:", err)
+      toast.error("Error al registrar el ingreso")
+    } finally {
+      setIsSubmitting(false)
+    }
   }
 
   const handleInputChange = (field: string, value: string | boolean) => {

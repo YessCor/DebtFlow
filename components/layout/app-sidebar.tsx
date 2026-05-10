@@ -43,6 +43,7 @@ interface MenuItem {
 const adminMenuItems: MenuItem[] = [
   { href: "/admin/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/admin/users", label: "Usuarios", icon: Users },
+  { href: "/admin/notifications", label: "Notificaciones", icon: Bell },
   { href: "/admin/reports", label: "Reportes", icon: FileText },
   { href: "/admin/settings", label: "Configuración", icon: Settings },
 ]
@@ -62,7 +63,6 @@ const userMenuItems: MenuItem[] = [
     { href: "/dashboard/new-loan-given", label: "Registrar", icon: TrendingUp },
   ]},
   { href: "/dashboard/payments", label: "Pagos", icon: History },
-  { href: "/dashboard/notifications", label: "Notificaciones", icon: Bell, badge: "3" },
   { href: "/dashboard/profile", label: "Mi Perfil", icon: User },
 ]
 
