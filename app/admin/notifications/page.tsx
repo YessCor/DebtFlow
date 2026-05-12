@@ -124,8 +124,8 @@ export default function AdminNotificationsPage() {
                       <TableRow key={n.id}>
                         <TableCell className="font-medium">{n.owner_id}</TableCell>
                         <TableCell>{kindToBadge(n.kind)}</TableCell>
-                        <TableCell className="max-w-xs truncate">{n.title}</TableCell>
-                        <TableCell className="max-w-md truncate">{n.body || "-"}</TableCell>
+                        <TableCell className="max-w-[140px] sm:max-w-xs truncate">{n.title}</TableCell>
+                        <TableCell className="max-w-[180px] sm:max-w-md truncate">{n.body || "-"}</TableCell>
                         <TableCell>{formatDateTime(n.created_at)}</TableCell>
                         <TableCell>
                           {n.is_read ? (
@@ -173,7 +173,7 @@ export default function AdminNotificationsPage() {
                         <TableRow key={n.id}>
                           <TableCell className="font-medium">{n.owner_id}</TableCell>
                           <TableCell>{kindToBadge(n.kind)}</TableCell>
-                          <TableCell className="max-w-xs truncate">{n.title}</TableCell>
+                          <TableCell className="max-w-[140px] sm:max-w-xs truncate">{n.title}</TableCell>
                           <TableCell>{formatDateTime(n.created_at)}</TableCell>
                         </TableRow>
                       ))

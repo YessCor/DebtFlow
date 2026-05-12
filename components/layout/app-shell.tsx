@@ -78,7 +78,7 @@ export function AppShell({ children, requiredRole }: AppShellProps) {
 
       <div className="flex-1 flex flex-col overflow-hidden">
         <AppHeader onMenuClick={() => setSidebarOpen(true)} />
-        <main className="flex-1 overflow-auto">
+        <main className="flex-1 overflow-auto px-4 sm:px-6 lg:px-6">
           {children}
         </main>
       </div>
