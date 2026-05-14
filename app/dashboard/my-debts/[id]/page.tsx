@@ -8,7 +8,16 @@ import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { ArrowLeft, DollarSign, Calendar, Percent, CheckCircle, Trash2, Edit, Save, X } from "lucide-react"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog"
+import { ArrowLeft, DollarSign, Trash2, Edit, Save, X, Plus } from "lucide-react"
 import { useAuth } from "@/lib/auth-context"
 import { supabase } from "@/lib/supabase-client"
 import { toast } from "sonner"
@@ -125,7 +134,19 @@ export default function MyDebtDetailPage({ params }: { params: Promise<{ id: str
 
       if (error) throw error
 
-      setLoan((prev) => prev ? { ...prev, ...editData, principal_amount: parseFloat(editData.principal_amount) } : null)
+      setLoan((prev) => prev
+        ? {
+            ...prev,
+            title: editData.title,
+            description: editData.description,
+            principal_amount: parseFloat(editData.principal_amount),
+            interest_rate: parseFloat(editData.interest_rate) || 0,
+            due_on: editData.due_on || null,
+            notes: editData.notes || null,
+            status: editData.status,
+          }
+        : null
+      )
       setIsEditing(false)
       toast.success("Deuda actualizada")
     } catch (err) {
@@ -341,8 +362,16 @@ export default function MyDebtDetailPage({ params }: { params: Promise<{ id: str
 
         <div className="space-y-6">
           <Card>
-            <CardHeader>
-              <CardTitle>Resumen de Pagos</CardTitle>
+            <CardHeader className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+              <div>
+                <CardTitle>Resumen de Pagos</CardTitle>
+                <CardDescription>
+                  {payments.length} pago(s) registrado(s)
+                </CardDescription>
+              </div>
+              {pending > 0 && !isEditing && (
+                <PaymentDialog loanId={loan.id} pending={pending} onDone={fetchLoanDetails} />
+              )}
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="text-center">
@@ -413,3 +442,131 @@ export default function MyDebtDetailPage({ params }: { params: Promise<{ id: str
     </div>
   )
 }
+
+function PaymentDialog({
+  loanId,
+  pending,
+  onDone,
+}: {
+  loanId: string
+  pending: number
+  onDone: () => Promise<void>
+}) {
+  const { user } = useAuth()
+  const [open, setOpen] = useState(false)
+  const [amount, setAmount] = useState("")
+  const [paidOn, setPaidOn] = useState(new Date().toISOString().split("T")[0])
+  const [method, setMethod] = useState("transfer")
+  const [isSubmitting, setIsSubmitting] = useState(false)
+
+  const handleSubmit = async () => {
+    if (!user) {
+      toast.error("No hay sesión activa")
+      return
+    }
+
+    const numericAmount = Number(amount)
+    if (!amount || !Number.isFinite(numericAmount) || numericAmount <= 0) {
+      toast.error("El monto debe ser mayor a 0")
+      return
+    }
+
+    if (numericAmount > pending) {
+      toast.error("El monto no puede superar el pendiente")
+      return
+    }
+
+    setIsSubmitting(true)
+    try {
+      const { error } = await supabase.from("payments").insert({
+        owner_id: user.id,
+        loan_id: loanId,
+        amount: numericAmount,
+        paid_on: paidOn,
+        status: "paid",
+        method,
+      })
+
+      if (error) throw error
+
+      await onDone()
+
+      setOpen(false)
+      setAmount("")
+      setPaidOn(new Date().toISOString().split("T")[0])
+      toast.success("Pago registrado")
+    } catch (err) {
+      console.error(err)
+      toast.error("Error al registrar el pago")
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button>
+          <Plus className="mr-2 h-4 w-4" />
+          Registrar pago
+        </Button>
+      </DialogTrigger>
+
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Registrar un pago</DialogTitle>
+          <DialogDescription>
+            Registra un abono para reducir el saldo pendiente de esta deuda.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-4 py-2">
+          <div className="space-y-2">
+            <Label>Monto</Label>
+            <Input
+              type="number"
+              min="0"
+              step="0.01"
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+              placeholder={`Hasta ${formatCurrency(pending)}`}
+            />
+          </div>
+
+          <div className="space-y-2">
+            <Label>Fecha</Label>
+            <Input
+              type="date"
+              value={paidOn}
+              onChange={(e) => setPaidOn(e.target.value)}
+            />
+          </div>
+
+          <div className="space-y-2">
+            <Label>Método</Label>
+            <select
+              className="w-full px-3 py-2 rounded-md border bg-background"
+              value={method}
+              onChange={(e) => setMethod(e.target.value)}
+            >
+              <option value="transfer">Transferencia</option>
+              <option value="cash">Efectivo</option>
+              <option value="card">Tarjeta</option>
+              <option value="check">Cheque</option>
+            </select>
+          </div>
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" onClick={() => setOpen(false)} disabled={isSubmitting}>
+            Cancelar
+          </Button>
+          <Button onClick={handleSubmit} disabled={isSubmitting}>
+            {isSubmitting ? "Guardando..." : "Registrar"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
