@@ -4,8 +4,9 @@ import { useState, useEffect } from "react"
 import { useAuth } from "@/lib/auth-context"
 import { useTheme } from "@teispace/next-themes"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
+
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
+
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -22,7 +23,7 @@ import {
   BreadcrumbPage,
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb"
-import { Menu, Search, Bell, Moon, Sun, User, Settings, LogOut, Check } from "lucide-react"
+import { Menu, Bell, Moon, Sun, User, Settings, LogOut, Check } from "lucide-react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { supabase } from "@/lib/supabase-client"
@@ -191,16 +192,7 @@ export function AppHeader({ onMenuClick }: AppHeaderProps) {
         </BreadcrumbList>
       </Breadcrumb>
 
-      <div className="hidden lg:flex flex-1 max-w-md ml-auto">
-        <div className="relative w-full">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input
-            type="search"
-            placeholder="Buscar..."
-            className="pl-10 bg-muted/50"
-          />
-        </div>
-      </div>
+
 
       <div className="flex items-center gap-2 ml-auto lg:ml-4">
         <DropdownMenu open={showThemeMenu} onOpenChange={setShowThemeMenu}>
@@ -223,11 +215,7 @@ export function AppHeader({ onMenuClick }: AppHeaderProps) {
               Oscuro
               {theme === "dark" && <Check className="ml-auto h-4 w-4" />}
             </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => { setTheme("system"); setShowThemeMenu(false) }}>
-              <span className="mr-2">💻</span>
-              Sistema
-              {theme === "system" && <Check className="ml-auto h-4 w-4" />}
-            </DropdownMenuItem>
+
           </DropdownMenuContent>
         </DropdownMenu>
 

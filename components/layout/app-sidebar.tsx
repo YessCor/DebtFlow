@@ -50,18 +50,9 @@ const adminMenuItems: MenuItem[] = [
 
 const userMenuItems: MenuItem[] = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { label: "Ingresos", icon: DollarSign, children: [
-    { href: "/dashboard/my-incomes", label: "Ver Todos", icon: DollarSign },
-    { href: "/dashboard/new-income", label: "Registrar", icon: TrendingUp },
-  ]},
-  { label: "Deudas", icon: CreditCard, children: [
-    { href: "/dashboard/my-debts", label: "Ver Todas", icon: CreditCard },
-    { href: "/dashboard/new-debt", label: "Registrar", icon: TrendingUp },
-  ]},
-  { label: "Préstamos", icon: Handshake, children: [
-    { href: "/dashboard/loans-given", label: "Ver Todos", icon: Handshake },
-    { href: "/dashboard/new-loan-given", label: "Registrar", icon: TrendingUp },
-  ]},
+  { href: "/dashboard/my-incomes", label: "Ingresos", icon: DollarSign },
+  { href: "/dashboard/my-debts", label: "Deudas", icon: CreditCard },
+  { href: "/dashboard/loans-given", label: "Préstamos", icon: Handshake },
   { href: "/dashboard/payments", label: "Pagos", icon: History },
   { href: "/dashboard/profile", label: "Mi Perfil", icon: User },
 ]

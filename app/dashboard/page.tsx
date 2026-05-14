@@ -127,7 +127,10 @@ export default function UserDashboardPage() {
     .filter(l => l.status === "active")
     .reduce((sum, l) => sum + Number(l.principal_amount), 0)
 
-  const netWorth = totalIncome - totalDebtPending + totalLoansPending
+  // Patrimonio neto: el pago se realiza con dinero ingresado, por lo tanto reduce el patrimonio neto.
+  // Se resta el total de pagos pagados efectivamente.
+  const netWorth = totalIncome - totalDebtPending + totalLoansPending - totalDebtPaid
+
 
   const activeDebts = debts.filter(d => d.status === "active").length
 
