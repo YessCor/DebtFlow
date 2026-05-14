@@ -345,16 +345,33 @@ export default function PaymentsPage() {
                   <div className="border-t pt-4 mt-4">
                     <p className="text-sm font-medium mb-2">Pagos ({loanPayments.length})</p>
                     <div className="space-y-2 max-h-40 overflow-y-auto">
-                      {loanPayments.map((payment) => (
-                        <div key={payment.id} className="flex justify-between text-sm p-2 rounded bg-muted/50">
-                          <span className="text-muted-foreground">
-                            {formatDate(payment.paid_on)}
-                          </span>
-                          <span className="font-medium text-green-600">
-                            {formatCurrency(Number(payment.amount))}
-                          </span>
-                        </div>
-                      ))}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        {loanPayments.map((payment) => (
+                          <div
+                            key={payment.id}
+                            className="p-3 rounded-lg border bg-muted/30"
+                          >
+                            <p className="text-sm text-muted-foreground">
+                              {formatDate(payment.paid_on)}
+                            </p>
+                            <p className="text-base font-bold text-green-600">
+                              {formatCurrency(Number(payment.amount))}
+                            </p>
+                            <div className="mt-2">
+                              <Badge
+                                variant="secondary"
+                                className={
+                                  payment.status === "paid"
+                                    ? "bg-green-100 text-green-800"
+                                    : "bg-orange-100 text-orange-800"
+                                }
+                              >
+                                {payment.status === "paid" ? "Pagado" : "Pendiente"}
+                              </Badge>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
                     </div>
                   </div>
                 )}

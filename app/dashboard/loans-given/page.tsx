@@ -5,30 +5,67 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
 import { useAuth } from "@/lib/auth-context"
-import {
-  getLoansGivenByUserId,
-  formatCurrency,
-  formatDate,
-  getLoanGivenStatusLabel,
-  getLoanGivenStatusColor,
-} from "@/lib/mock-data"
+import { formatCurrency, formatDate, getLoanGivenStatusLabel, getLoanGivenStatusColor } from "@/lib/mock-data"
+import { useEffect, useMemo, useState } from "react"
+import { getLoansByUserId } from "@/lib/supabase-admin"
 import { Plus, Handshake, TrendingUp, AlertTriangle, CheckCircle, ArrowRight } from "lucide-react"
 import Link from "next/link"
 
 export default function LoansGivenPage() {
   const { user } = useAuth()
+  const [loans, setLoans] = useState<any[]>([])
+  const [loading, setLoading] = useState(false)
 
-  if (!user) return null
+  useEffect(() => {
+    if (!user) return
+    setLoading(true)
+    getLoansByUserId(user.id)
+      .then((res) => setLoans(res as any[]))
+      .catch(() => setLoans([]))
+      .finally(() => setLoading(false))
+  }, [user])
 
-  const userLoans = getLoansGivenByUserId(user.id)
-  const totalPrincipal = userLoans.reduce((sum, l) => sum + l.principalAmount, 0)
-  const totalInterest = userLoans.reduce((sum, l) => sum + (l.totalAmount - l.principalAmount), 0)
-  const totalCollected = userLoans.reduce((sum, l) => sum + l.paidAmount, 0)
-  const totalPending = userLoans.reduce((sum, l) => sum + (l.totalAmount - l.paidAmount), 0)
+  const userLoans = useMemo(() => loans.filter((l) => l.direction === "given"), [loans])
 
-  const activeLoans = userLoans.filter((l) => l.status === "active" || l.status === "partial")
+  // En esta vista la tabla 'loans' no expone paidAmount/totalAmount.
+  // Calculamos total con principal_amount e interest_rate y dejamos paidAmount=0.
+  const withComputed = useMemo(() => {
+
+    return userLoans.map((loan) => {
+      const principal = Number(loan.principal_amount ?? 0)
+      const interestRate = Number(loan.interest_rate ?? 0)
+      const total = principal * (1 + interestRate / 100)
+      const paidAmount = 0
+
+      return {
+        ...loan,
+        principalAmount: principal,
+        totalAmount: total,
+        paidAmount,
+        borrowerName: loan.people?.name || (loan as any).counterparty_name || (loan as any).borrowerName || "(sin nombre)",
+        borrowerContact: null,
+        startDate: (loan as any).started_on || (loan as any).startDate || null,
+        dueDate: (loan as any).due_on || (loan as any).dueDate || null,
+        status: ((loan.status as any) === "closed" ? "paid" : loan.status) as any,
+        payments: [],
+      }
+    })
+  }, [userLoans])
+
+  const displayLoans = withComputed
+
+  const totalPrincipal = displayLoans.reduce((sum, l) => sum + l.principalAmount, 0)
+  const totalInterest = displayLoans.reduce((sum, l) => sum + (l.totalAmount - l.principalAmount), 0)
+  const totalCollected = displayLoans.reduce((sum, l) => sum + l.paidAmount, 0)
+  const totalPending = displayLoans.reduce((sum, l) => sum + (l.totalAmount - l.paidAmount), 0)
+
+  const activeLoans = userLoans.filter((l) => l.status === "active")
+
   const overdueLoans = userLoans.filter((l) => l.status === "overdue")
-  const paidLoans = userLoans.filter((l) => l.status === "paid")
+  const paidLoans = userLoans.filter((l) => l.status === "closed")
+
+
+
 
   return (
     <div className="p-4 lg:p-6 space-y-6">
@@ -130,7 +167,8 @@ export default function LoansGivenPage() {
         </CardHeader>
         <CardContent>
           <div className="space-y-4">
-            {userLoans.map((loan) => {
+            {(loading ? [] : displayLoans).map((loan) => {
+
               const progress = (loan.paidAmount / loan.totalAmount) * 100
               return (
                 <div key={loan.id} className="p-4 rounded-lg border bg-card">
@@ -189,7 +227,8 @@ export default function LoansGivenPage() {
                 </div>
               )
             })}
-            {userLoans.length === 0 && (
+            {!loading && displayLoans.length === 0 && (
+
               <div className="text-center py-8 text-muted-foreground">
                 No tienes préstamos registrados
                 <Link href="/dashboard/new-loan-given" className="block mt-2">

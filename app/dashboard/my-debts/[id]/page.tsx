@@ -373,36 +373,34 @@ export default function MyDebtDetailPage({ params }: { params: Promise<{ id: str
         </CardHeader>
         <CardContent>
           {payments.length > 0 ? (
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead>
-                  <tr className="border-b text-left">
-                    <th className="pb-3 text-sm font-medium text-muted-foreground">Fecha</th>
-                    <th className="pb-3 text-sm font-medium text-muted-foreground">Monto</th>
-                    <th className="pb-3 text-sm font-medium text-muted-foreground">Estado</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {payments.map((payment) => (
-                    <tr key={payment.id} className="border-b last:border-0">
-                      <td className="py-3 text-sm">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {payments.map((payment) => (
+                <div
+                  key={payment.id}
+                  className="p-4 rounded-lg border bg-muted/20"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-sm text-muted-foreground">
                         {formatDate(payment.paid_on)}
-                      </td>
-                      <td className="py-3 text-sm font-medium text-green-600">
+                      </p>
+                      <p className="text-2xl font-bold text-green-600">
                         {formatCurrency(Number(payment.amount))}
-                      </td>
-                      <td className="py-3">
-                        <Badge
-                          variant="secondary"
-                          className="bg-green-100 text-green-800"
-                        >
-                          {payment.status === "paid" ? "Pagado" : "Pendiente"}
-                        </Badge>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+                      </p>
+                    </div>
+                    <Badge
+                      variant="secondary"
+                      className={
+                        payment.status === "paid"
+                          ? "bg-green-100 text-green-800"
+                          : "bg-orange-100 text-orange-800"
+                      }
+                    >
+                      {payment.status === "paid" ? "Pagado" : "Pendiente"}
+                    </Badge>
+                  </div>
+                </div>
+              ))}
             </div>
           ) : (
             <div className="text-center py-8 text-muted-foreground">
@@ -411,6 +409,7 @@ export default function MyDebtDetailPage({ params }: { params: Promise<{ id: str
           )}
         </CardContent>
       </Card>
+
     </div>
   )
 }
